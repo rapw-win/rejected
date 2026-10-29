@@ -12,7 +12,6 @@ from texts import (
     CHECK_BUTTON,
     EMOJI_CHECK,
     EMOJI_SUBSCRIBE,
-    FILES_CAPTION,
     SUBSCRIBE_BUTTON,
 )
 
@@ -131,16 +130,18 @@ def extract_file(message: Message) -> dict | None:
 
 
 async def send_link_files(bot: Bot, db: Database, chat_id: int, code: str) -> bool:
-    """Отправляет файлы ссылки как есть. На первом сообщении — подпись и эффект конфетти."""
+    """Отправляет файлы ссылки как есть. На первом сообщении — текст админа (если есть) и конфетти."""
+    link = db.get_link(code)
     files = db.get_link_files(code)
-    if not files:
+    if not link or not files:
         return False
     for index, file in enumerate(files):
         method_name, field = _SENDERS[file["file_type"]]
         kwargs = {"chat_id": chat_id, field: file["file_id"]}
         if index == 0:
-            kwargs["caption"] = FILES_CAPTION
             kwargs["message_effect_id"] = CONFETTI_EFFECT_ID
+            if link["caption"]:
+                kwargs["caption"] = link["caption"]
         await safe_call(getattr(bot, method_name), **kwargs)
     db.add_delivery(code)
     return True

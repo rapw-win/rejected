@@ -30,6 +30,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS links (
                 code       TEXT PRIMARY KEY,
                 title      TEXT,
+                caption    TEXT,
                 clicks     INTEGER DEFAULT 0,
                 deliveries INTEGER DEFAULT 0,
                 created_at INTEGER
@@ -55,6 +56,10 @@ class Database:
             );
             """
         )
+        # Миграция для баз, созданных до появления текста к файлам
+        columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(links)")}
+        if "caption" not in columns:
+            self.conn.execute("ALTER TABLE links ADD COLUMN caption TEXT")
         self.conn.commit()
 
     # ---------- meta ----------
@@ -93,14 +98,14 @@ class Database:
 
     # ---------- links ----------
 
-    def create_link(self, title: str, files: list[dict]) -> str:
+    def create_link(self, title: str, files: list[dict], caption: str | None = None) -> str:
         while True:
             code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(8))
             if not self.get_link(code):
                 break
         self.conn.execute(
-            "INSERT INTO links (code, title, created_at) VALUES (?, ?, ?)",
-            (code, title, int(time.time())),
+            "INSERT INTO links (code, title, caption, created_at) VALUES (?, ?, ?, ?)",
+            (code, title, caption, int(time.time())),
         )
         self.conn.executemany(
             "INSERT INTO link_files (code, file_type, file_id, file_name) VALUES (?, ?, ?, ?)",
@@ -124,6 +129,10 @@ class Database:
         return self.conn.execute(
             "SELECT * FROM link_files WHERE code = ? ORDER BY id", (code,)
         ).fetchall()
+
+    def set_link_caption(self, code: str, caption: str | None) -> None:
+        self.conn.execute("UPDATE links SET caption = ? WHERE code = ?", (caption, code))
+        self.conn.commit()
 
     def delete_link(self, code: str) -> None:
         self.conn.execute("DELETE FROM links WHERE code = ?", (code,))

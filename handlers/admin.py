@@ -11,8 +11,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import ADMIN_IDS, MAX_FILES
 from database import Database
-from handlers.states import AddChannel, NewLink
-from texts import ADD_CHANNEL_TEXT, ADMIN_MENU_TEXT, BIND_CHANNEL_TEXT, NEW_LINK_TEXT
+from handlers.states import AddChannel, EditCaption, NewLink
+from texts import ADD_CHANNEL_TEXT, ADMIN_MENU_TEXT, BIND_CHANNEL_TEXT, CAPTION_TEXT, NEW_LINK_TEXT
 from utils import deep_link, extract_file, send_link_files
 
 router = Router()
@@ -20,6 +20,7 @@ router.message.filter(F.chat.type == "private", F.from_user.id.in_(ADMIN_IDS))
 router.callback_query.filter(F.from_user.id.in_(ADMIN_IDS))
 
 LINKS_PER_PAGE = 8
+MAX_CAPTION = 1024
 _upload_lock = asyncio.Lock()
 
 
@@ -119,7 +120,7 @@ async def new_link_file(message: Message, state: FSMContext, bot: Bot, db: Datab
         await state.update_data(files=files)
 
     if len(files) >= MAX_FILES:
-        await finish_link(message, state, bot, db)
+        await ask_caption(message, state)
         return
     await message.answer(
         f"<b>✅ Файл {len(files)}/{MAX_FILES} добавлен:</b> {html.escape(file['name'])}\n\n"
@@ -129,12 +130,43 @@ async def new_link_file(message: Message, state: FSMContext, bot: Bot, db: Datab
 
 
 @router.callback_query(F.data == "adm:newdone", NewLink.files)
-async def cb_new_link_done(call: CallbackQuery, state: FSMContext, bot: Bot, db: Database):
+async def cb_new_link_done(call: CallbackQuery, state: FSMContext):
     await call.answer()
-    await finish_link(call.message, state, bot, db)
+    await ask_caption(call.message, state)
 
 
-async def finish_link(message: Message, state: FSMContext, bot: Bot, db: Database) -> None:
+async def ask_caption(message: Message, state: FSMContext) -> None:
+    await state.set_state(NewLink.caption)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➡️ Без текста", callback_data="adm:nocaption")
+    kb.button(text="✖️ Отмена", callback_data="adm:menu")
+    kb.adjust(1)
+    await message.answer(CAPTION_TEXT, reply_markup=kb.as_markup())
+
+
+def read_caption(message: Message) -> str | None:
+    """HTML-текст админа с сохранением форматирования, или None, если он не подходит."""
+    if not message.text or len(message.text) > MAX_CAPTION:
+        return None
+    return message.html_text
+
+
+@router.message(NewLink.caption, not_command)
+async def new_link_caption(message: Message, state: FSMContext, bot: Bot, db: Database):
+    caption = read_caption(message)
+    if caption is None:
+        await message.answer(f"<b>Нужен текст до {MAX_CAPTION} символов.</b> Или нажми «Без текста».")
+        return
+    await finish_link(message, state, bot, db, caption)
+
+
+@router.callback_query(F.data == "adm:nocaption", NewLink.caption)
+async def cb_new_link_no_caption(call: CallbackQuery, state: FSMContext, bot: Bot, db: Database):
+    await call.answer()
+    await finish_link(call.message, state, bot, db, None)
+
+
+async def finish_link(message: Message, state: FSMContext, bot: Bot, db: Database, caption: str | None) -> None:
     files = (await state.get_data()).get("files", [])
     await state.clear()
     if not files:
@@ -142,14 +174,15 @@ async def finish_link(message: Message, state: FSMContext, bot: Bot, db: Databas
         return
 
     title = files[0]["name"][:40] + (f" +{len(files) - 1}" if len(files) > 1 else "")
-    code = db.create_link(title, files)
+    code = db.create_link(title, files, caption)
     url = await deep_link(bot, code)
     kb = InlineKeyboardBuilder()
     kb.button(text="⚙️ Открыть ссылку", callback_data=f"adm:link:{code}")
     kb.button(text="◀️ В меню", callback_data="adm:menu")
     kb.adjust(1)
     await message.answer(
-        f"<b>🎉 Ссылка создана!</b>\n\n<code>{url}</code>\n\nФайлов: {len(files)}",
+        f"<b>🎉 Ссылка создана!</b>\n\n<code>{url}</code>\n\n"
+        f"Файлов: {len(files)}\nТекст: {'есть' if caption else 'нет'}",
         reply_markup=kb.as_markup(),
     )
 
@@ -183,7 +216,8 @@ async def cb_links(call: CallbackQuery, db: Database):
 
 
 @router.callback_query(F.data.startswith("adm:link:"))
-async def cb_link_card(call: CallbackQuery, bot: Bot, db: Database):
+async def cb_link_card(call: CallbackQuery, state: FSMContext, bot: Bot, db: Database):
+    await state.clear()
     code = call.data.split(":", 2)[2]
     link = db.get_link(code)
     if not link:
@@ -195,15 +229,50 @@ async def cb_link_card(call: CallbackQuery, bot: Bot, db: Database):
         "<b>🔗 Ссылка</b>\n"
         f"<code>{await deep_link(bot, code)}</code>\n\n"
         f"<b>📁 Файлы:</b>\n{files_text}\n\n"
+        f"<b>✍️ Текст:</b> {'есть — придёт с первым файлом' if link['caption'] else 'нет'}\n\n"
         f"👁 Переходов: <b>{link['clicks']}</b>\n"
         f"📥 Выдач: <b>{link['deliveries']}</b>"
     )
     kb = InlineKeyboardBuilder()
     kb.button(text="👀 Получить файлы", callback_data=f"adm:test:{code}")
+    kb.button(text="✍️ Изменить текст" if link["caption"] else "✍️ Добавить текст", callback_data=f"adm:cap:{code}")
+    if link["caption"]:
+        kb.button(text="🧹 Убрать текст", callback_data=f"adm:capdel:{code}")
     kb.button(text="🗑 Удалить", callback_data=f"adm:del:{code}")
     kb.button(text="◀️ Назад", callback_data="adm:links:0")
-    kb.adjust(2, 1)
+    kb.adjust(1)
     await show(call, text, kb.as_markup())
+
+
+@router.callback_query(F.data.startswith("adm:cap:"))
+async def cb_edit_caption(call: CallbackQuery, state: FSMContext):
+    code = call.data.split(":", 2)[2]
+    await state.set_state(EditCaption.text)
+    await state.update_data(code=code)
+    await show(
+        call,
+        CAPTION_TEXT.replace("Или нажми «Без текста» — тогда придут только файлы.", "Старый текст будет заменён."),
+        back_kb(f"adm:link:{code}", "✖️ Отмена"),
+    )
+
+
+@router.message(EditCaption.text, not_command)
+async def edit_caption_text(message: Message, state: FSMContext, db: Database):
+    caption = read_caption(message)
+    if caption is None:
+        await message.answer(f"<b>Нужен текст до {MAX_CAPTION} символов.</b>")
+        return
+    code = (await state.get_data()).get("code")
+    await state.clear()
+    db.set_link_caption(code, caption)
+    await message.answer("<b>✅ Текст сохранён.</b>", reply_markup=back_kb(f"adm:link:{code}", "◀️ К ссылке"))
+
+
+@router.callback_query(F.data.startswith("adm:capdel:"))
+async def cb_delete_caption(call: CallbackQuery, db: Database):
+    code = call.data.split(":", 2)[2]
+    db.set_link_caption(code, None)
+    await show(call, "<b>✅ Текст убран.</b> Теперь придут только файлы.", back_kb(f"adm:link:{code}", "◀️ К ссылке"))
 
 
 @router.callback_query(F.data.startswith("adm:test:"))
