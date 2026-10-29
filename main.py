@@ -44,7 +44,7 @@ async def set_commands(bot: Bot) -> None:
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     if not BOT_TOKEN:
-        sys.exit("BOT_TOKEN не задан: создай файл .env (см. .env.example) или переменную окружения BOT_TOKEN")
+        sys.exit("BOT_TOKEN не задан: создай файл .env рядом с main.py или переменную окружения BOT_TOKEN")
 
     db = Database(DB_PATH)
     db.seed_channels(DEFAULT_CHANNEL_LINKS)
