@@ -10,6 +10,11 @@ class EditCaption(StatesGroup):
     text = State()
 
 
+class Broadcast(StatesGroup):
+    message = State()
+    buttons = State()
+
+
 class AddChannel(StatesGroup):
     link = State()
     bind = State()

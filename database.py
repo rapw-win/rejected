@@ -25,6 +25,7 @@ class Database:
                 username   TEXT,
                 full_name  TEXT,
                 last_ref   TEXT,
+                blocked    INTEGER DEFAULT 0,
                 joined_at  INTEGER
             );
             CREATE TABLE IF NOT EXISTS links (
@@ -60,6 +61,9 @@ class Database:
         columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(links)")}
         if "caption" not in columns:
             self.conn.execute("ALTER TABLE links ADD COLUMN caption TEXT")
+        columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(users)")}
+        if "blocked" not in columns:
+            self.conn.execute("ALTER TABLE users ADD COLUMN blocked INTEGER DEFAULT 0")
         self.conn.commit()
 
     # ---------- meta ----------
@@ -79,7 +83,8 @@ class Database:
         self.conn.execute(
             """
             INSERT INTO users (user_id, username, full_name, joined_at) VALUES (?, ?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET username = excluded.username, full_name = excluded.full_name
+            ON CONFLICT(user_id) DO UPDATE SET
+                username = excluded.username, full_name = excluded.full_name, blocked = 0
             """,
             (user_id, username, full_name, int(time.time())),
         )
@@ -95,6 +100,16 @@ class Database:
 
     def count_users(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+
+    def count_active_users(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM users WHERE blocked = 0").fetchone()[0]
+
+    def get_active_user_ids(self) -> list[int]:
+        return [row[0] for row in self.conn.execute("SELECT user_id FROM users WHERE blocked = 0")]
+
+    def set_blocked(self, user_id: int) -> None:
+        self.conn.execute("UPDATE users SET blocked = 1 WHERE user_id = ?", (user_id,))
+        self.conn.commit()
 
     # ---------- links ----------
 

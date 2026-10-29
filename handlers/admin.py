@@ -36,8 +36,9 @@ def menu_kb() -> InlineKeyboardMarkup:
     kb.button(text="📎 Создать ссылку", callback_data="adm:new")
     kb.button(text="🔗 Мои ссылки", callback_data="adm:links:0")
     kb.button(text="📢 Каналы", callback_data="adm:channels")
+    kb.button(text="📣 Рассылка", callback_data="adm:bc")
     kb.button(text="📊 Статистика", callback_data="adm:stats")
-    kb.adjust(1, 2, 1)
+    kb.adjust(1, 2, 2)
     return kb.as_markup()
 
 
@@ -86,7 +87,7 @@ async def cb_stats(call: CallbackQuery, db: Database):
     clicks, deliveries = db.links_totals()
     text = (
         "<b>📊 Статистика</b>\n\n"
-        f"👤 Пользователей: <b>{db.count_users()}</b>\n"
+        f"👤 Пользователей: <b>{db.count_users()}</b> (активных: {db.count_active_users()})\n"
         f"🔗 Ссылок: <b>{db.count_links()}</b>\n"
         f"👁 Переходов: <b>{clicks}</b>\n"
         f"📥 Выдач файлов: <b>{deliveries}</b>\n"

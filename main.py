@@ -13,7 +13,7 @@ from aiohttp import web
 
 from config import ADMIN_IDS, BOT_TOKEN, DB_PATH, DEFAULT_CHANNEL_LINKS, PORT, PROXY
 from database import Database
-from handlers import admin, channels, user
+from handlers import admin, broadcast, channels, user
 
 
 async def start_health_server(port: int) -> None:
@@ -56,7 +56,7 @@ async def main() -> None:
     )
     dp = Dispatcher(storage=MemoryStorage(), db=db)
     # Порядок важен: админские обработчики раньше пользовательских
-    dp.include_routers(admin.router, channels.router, user.router)
+    dp.include_routers(admin.router, broadcast.router, channels.router, user.router)
 
     if PORT:
         await start_health_server(int(PORT))
